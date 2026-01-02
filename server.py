@@ -10,6 +10,7 @@ sio = socketio.AsyncServer(async_mode='aiohttp', cors_allowed_origins='*', max_h
 app = web.Application()
 sio.attach(app)
 
+# Dictionary to store {sid: username}
 users = {}
 
 # --- ROUTES ---
@@ -20,25 +21,23 @@ async def index(request):
     except FileNotFoundError:
         return web.Response(text="index.html not found", status=404)
 
-# NEW: Routes for PWA Files
-async def serve_manifest(request):
-    return web.FileResponse('./manifest.json')
+# PWA Routes
+async def serve_manifest(request): return web.FileResponse('./manifest.json')
+async def serve_sw(request): return web.FileResponse('./sw.js')
+async def serve_icon_192(request): return web.FileResponse('./icon-192.png')
+async def serve_icon_512(request): return web.FileResponse('./icon-512.png')
 
-async def serve_sw(request):
-    return web.FileResponse('./sw.js')
-
-async def serve_icon_192(request):
-    return web.FileResponse('./icon-192.png')
-
-async def serve_icon_512(request):
-    return web.FileResponse('./icon-512.png')
-
-# Add routes
 app.router.add_get('/', index)
 app.router.add_get('/manifest.json', serve_manifest)
 app.router.add_get('/sw.js', serve_sw)
 app.router.add_get('/icon-192.png', serve_icon_192)
 app.router.add_get('/icon-512.png', serve_icon_512)
+
+# --- HELPER FUNCTIONS ---
+async def broadcast_user_list():
+    """Constructs the list of all connected users and sends it to everyone."""
+    user_list = [{"sid": sid, "name": name} for sid, name in users.items()]
+    await sio.emit('update_user_list', {'users': user_list, 'count': len(user_list)})
 
 # --- SOCKET EVENTS ---
 @sio.event
@@ -49,19 +48,34 @@ async def connect(sid, environ):
 async def join_chat(sid, data):
     username = data.get('username', 'Guest')
     users[sid] = username
+    # Send system message
     await sio.emit('receive_message', {'type': 'system', 'content': f'{username} has joined.'})
+    # Update user list
+    await broadcast_user_list()
 
 @sio.event
 async def disconnect(sid):
     if sid in users:
         username = users[sid]
         del users[sid]
+        # Notify others
         await sio.emit('receive_message', {'type': 'system', 'content': f'{username} has left.'})
+        # Update user list
+        await broadcast_user_list()
 
 @sio.event
 async def send_message(sid, data):
     await sio.emit('receive_message', data)
-    return True
+
+# --- TYPING EVENTS ---
+@sio.event
+async def typing(sid):
+    username = users.get(sid, "Someone")
+    await sio.emit('display_typing', {'username': username, 'sid': sid}, skip_sid=sid)
+
+@sio.event
+async def stop_typing(sid):
+    await sio.emit('hide_typing', {'sid': sid}, skip_sid=sid)
 
 # --- WEBRTC EVENTS ---
 @sio.event
