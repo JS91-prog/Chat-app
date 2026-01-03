@@ -2,6 +2,7 @@
 const CACHE_NAME = 'chat-app-v1';
 const urlsToCache = [
   './',
+  './index.html',
   './icon-192.png',
   './icon-512.png',
   './manifest.json'
